@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Database, Absensi & Invoice - PT Hasna Jaya Sejahtera</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+
+  <!-- Layar Kunci PIN Admin -->
+  <div id="pinOverlay" class="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-xs w-full p-6 text-center space-y-4">
+      <div class="w-12 h-12 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center mx-auto font-extrabold text-lg">HJS</div>
+      <div>
+        <h2 class="text-lg font-extrabold text-slate-800">Akses Admin HJS</h2>
+        <p class="text-xs text-slate-500 mt-1">Masukkan PIN Admin untuk mengelola database & invoice</p>
+      </div>
+      <input type="password" id="pinInput" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter') cekPin()" class="w-full text-center tracking-[0.5em] text-xl font-bold border border-slate-300 rounded-xl py-2.5 focus:ring-2 focus:ring-blue-600 outline-none">
+      <p id="pinError" class="text-xs text-rose-600 hidden">PIN salah! Coba lagi.</p>
+      <button onclick="cekPin()" class="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold py-2.5 rounded-xl text-sm transition">Buka Dashboard</button>
+    </div>
+  </div>
+
+  <!-- Top Navbar -->
+  <header class="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <span class="text-[11px] font-bold uppercase tracking-widest text-blue-300">PT Hasna Jaya Sejahtera</span>
+        <h1 class="text-lg sm:text-xl font-extrabold">Database Personel, Absensi & Invoice — MBU Bojong Soang</h1>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="cloudStatus" class="text-xs bg-white/10 border border-white/15 px-3 py-1.5 rounded-lg text-blue-100">Belum sinkron</span>
+        <button onclick="syncFromCloud()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow transition">
+          &#8635; Tarik Data HP (Cloud)
+        </button>
+        <button onclick="pushAllToCloud()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow transition">
+          &#9729; Simpan ke Cloud
+        </button>
+      </div>
+    </div>
+
+    <!-- Tab Navigasi -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 border-t border-white/10 pt-2">
+      <button onclick="switchTab('personel')" id="tabBtnPersonel" class="px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg bg-slate-100 text-blue-950">
+        1. Master Personel & Absen Manual
+      </button>
+      <button onclick="switchTab('invoice')" id="tabBtnInvoice" class="px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg text-blue-200 hover:text-white">
+        2. Rekap Jam Kerja & Cetak Invoice
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+    <!-- ==================== TAB 1: MASTER PERSONEL ==================== -->
+    <section id="viewPersonel" class="space-y-5">
+      
+      <!-- Statistik Ringkas -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 font-medium">Total Personel</div>
+          <div id="statTotal" class="text-2xl font-extrabold text-slate-800 mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 font-medium">Sudah Rontgen</div>
+          <div id="statRontgen" class="text-2xl font-extrabold text-emerald-600 mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 font-medium">Belum Rontgen</div>
+          <div id="statBelumRontgen" class="text-2xl font-extrabold text-amber-600 mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 font-medium">Hadir Hari Ini (Cloud)</div>
+          <div id="statHadirToday" class="text-2xl font-extrabold text-blue-700 mt-1">0</div>
+        </div>
+      </div>
+
+      <!-- Toolbar Filter & Tambah -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col lg:flex-row gap-3 justify-between">
+        <div class="flex flex-wrap gap-2 flex-1">
+          <input type="text" id="searchInput" oninput="renderPersonelTable()" placeholder="Cari nama, alamat, atau no HP..." class="border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm w-full sm:w-64 focus:ring-2 focus:ring-blue-600 outline-none">
+          <select id="filterRontgen" onchange="renderPersonelTable()" class="border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm bg-white">
+            <option value="ALL">Semua Status Rontgen</option>
+            <option value="SUDAH">Sudah Rontgen</option>
+            <option value="BELUM">Belum Rontgen</option>
+          </select>
+          <select id="filterShift" onchange="renderPersonelTable()" class="border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm bg-white">
+            <option value="ALL">Semua Shift</option>
+            <option value="Shift 1">Shift 1</option>
+            <option value="Shift 2">Shift 2</option>
+            <option value="Shift 3">Shift 3</option>
+          </select>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="openModalPersonel()" class="bg-blue-800 hover:bg-blue-900 text-white text-xs font-bold px-3.5 py-2 rounded-lg">+ Tambah Personel</button>
+          <button onclick="exportPersonelPDF()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg">Export PDF Daftar</button>
+        </div>
+      </div>
+
+      <!-- Tabel Personel -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-white text-xs uppercase">
+              <th class="py-3 px-3">No</th>
+              <th class="py-3 px-3">Nama Lengkap</th>
+              <th class="py-3 px-3">Alamat</th>
+              <th class="py-3 px-3">No. HP</th>
+              <th class="py-3 px-3 text-center">Status Rontgen</th>
+              <th class="py-3 px-3">Plot Shift Default</th>
+              <th class="py-3 px-3 text-center">Catat Hadir Manual</th>
+              <th class="py-3 px-3 text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyPersonel" class="divide-y divide-slate-200"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: REKAP & INVOICE ==================== -->
+    <section id="viewInvoice" class="hidden space-y-5">
+      
+      <!-- Pengaturan Periode & Tarif -->
+      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Mode Rekap</label>
+            <select id="rekapMode" onchange="togglePeriodeInputs(); renderRekap();" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white font-medium">
+              <option value="HARIAN">Harian (Per Tanggal)</option>
+              <option value="MINGGUAN" selected>Mingguan / Rentang Tanggal</option>
+              <option value="BULANAN">Bulanan</option>
+              <option value="SEMUA">Semua Riwayat</option>
+            </select>
+          </div>
+
+          <div id="boxTglMulai">
+            <label class="block text-xs font-bold text-slate-600 mb-1">Dari Tanggal</label>
+            <input type="date" id="tglMulai" onchange="renderRekap()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+
+          <div id="boxTglSelesai">
+            <label class="block text-xs font-bold text-slate-600 mb-1">Sampai Tanggal</label>
+            <input type="date" id="tglSelesai" onchange="renderRekap()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+
+          <div id="boxBulan" class="hidden">
+            <label class="block text-xs font-bold text-slate-600 mb-1">Pilih Bulan</label>
+            <input type="month" id="inputBulan" onchange="renderRekap()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Tarif per Jam (Rp) — <span class="text-slate-400 font-normal">Kosongkan jika belum fix</span></label>
+            <input type="number" id="inputTarif" oninput="renderRekap()" placeholder="Contoh: 21000" class="w-full border border-blue-300 bg-blue-50/40 rounded-lg px-3 py-2 text-sm font-bold text-blue-900">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2 border-t border-slate-100">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Nomor Invoice</label>
+            <input type="text" id="noInvoice" value="INV/HJS-MBU/2026/11/001" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Management Fee (%)</label>
+            <input type="number" id="inputFee" oninput="renderRekap()" value="0" min="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">PPN (%)</label>
+            <input type="number" id="inputPpn" oninput="renderRekap()" value="0" min="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div class="flex items-end gap-2">
+            <button onclick="exportRekapPDF()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2.5 px-3 rounded-lg">PDF Rekap Jam</button>
+            <button onclick="exportInvoicePDF()" class="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg">PDF Invoice</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ringkasan Tagihan -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500">Total Kehadiran (Shift)</div>
+          <div id="invTotalShift" class="text-xl font-extrabold text-slate-800 mt-1">0</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500">Total Akumulasi Jam</div>
+          <div id="invTotalJam" class="text-xl font-extrabold text-blue-700 mt-1">0 Jam</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500">Subtotal Tenaga Kerja</div>
+          <div id="invSubtotal" class="text-xl font-extrabold text-slate-800 mt-1">-</div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-blue-200 bg-blue-50/40 shadow-sm">
+          <div class="text-xs text-blue-800 font-bold">Grand Total Invoice</div>
+          <div id="invGrandTotal" class="text-xl font-extrabold text-blue-900 mt-1">-</div>
+        </div>
+      </div>
+
+      <!-- Tabel Rekap Per Personel (Untuk Invoice) -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+        <div class="px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+          <h3 class="text-sm font-extrabold text-slate-800">Ringkasan Jam Kerja per Personel</h3>
+          <span class="text-xs text-slate-500">Otomatis terhitung dari log absensi</span>
+        </div>
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-white text-xs uppercase">
+              <th class="py-2.5 px-3">No</th>
+              <th class="py-2.5 px-3">Nama Personel</th>
+              <th class="py-2.5 px-3 text-center">Jumlah Shift</th>
+              <th class="py-2.5 px-3 text-center">Total Jam Kerja</th>
+              <th class="py-2.5 px-3 text-right">Tarif / Jam</th>
+              <th class="py-2.5 px-3 text-right">Subtotal (Rp)</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyRekapPersonel" class="divide-y divide-slate-200"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabel Log Harian (Bisa Edit Durasi / Hapus jika salah input) -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+        <div class="px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+          <h3 class="text-sm font-extrabold text-slate-800">Rincian Log Absensi Harian (Edit Jam / Durasi)</h3>
+          <span class="text-xs text-slate-500">Klik angka durasi untuk menyesuaikan jam kerja</span>
+        </div>
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr class="bg-slate-100 text-slate-700 text-xs uppercase border-b border-slate-200">
+              <th class="py-2.5 px-3">Tanggal</th>
+              <th class="py-2.5 px-3">Nama Personel</th>
+              <th class="py-2.5 px-3">Shift</th>
+              <th class="py-2.5 px-3">Masuk</th>
+              <th class="py-2.5 px-3">Pulang</th>
+              <th class="py-2.5 px-3 text-center">Durasi (Jam)</th>
+              <th class="py-2.5 px-3 text-center">Hapus</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyLogHarian" class="divide-y divide-slate-200"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal Tambah/Edit Personel -->
+  <div id="modalPersonel" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-40">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+      <h3 id="modalTitle" class="text-lg font-extrabold text-slate-800">Tambah Personel Baru</h3>
+      <input type="hidden" id="editId">
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Nama Lengkap</label>
+        <input type="text" id="formNama" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Alamat</label>
+        <input type="text" id="formAlamat" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">No. Telepon / HP</label>
+        <input type="text" id="formHp" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Status Rontgen</label>
+          <select id="formRontgen" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+            <option value="false">Belum Rontgen</option>
+            <option value="true">Sudah Rontgen</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Plot Shift</label>
+          <select id="formShift" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+            <option value="">Belum Diplot</option>
+            <option value="Shift 1">Shift 1</option>
+            <option value="Shift 2">Shift 2</option>
+            <option value="Shift 3">Shift 3</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModalPersonel()" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+        <button onclick="savePersonelForm()" class="px-4 py-2 text-xs font-bold bg-blue-800 text-white rounded-lg hover:bg-blue-900">Simpan Data</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'https://script.google.com/macros/s/AKfycbz5T5r0YkdpxHjZ8YbzvnmIDPXVbvwVyh_mHaCS_HzJoDqP-ZwIOkENnk0-cSkNZ-Ri/exec';
+    const ADMIN_PIN = '1234'; // Ubah PIN sesuai keinginan Anda
+
+    const INITIAL_PERSONEL = [
+      { id: 1, nama: 'Ramdan Iskandar', alamat: 'Jl. Sukabakti', hp: '0851 8727 0749', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 2, nama: 'Much Rizki Firdaus', alamat: 'Jl. Majalaya', hp: '0852 9569 5893', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 3, nama: 'Bagas Oktaviana', alamat: 'Jl. Majalaya', hp: '0881 0222 56479', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 4, nama: 'Andri', alamat: 'Jl. Majalaya', hp: '0838 2014 5661', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 5, nama: 'Chaerul Umam', alamat: 'Jl. Majalaya', hp: '0852 8069 8027', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 6, nama: 'Syachrizal Fatturochman', alamat: 'Jl. Majalaya', hp: '0851 8290 4838', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 7, nama: 'Rahman Firman Syah', alamat: 'SD Muararajeun No. 12', hp: '0881 4597 264', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 8, nama: 'Agus Nanang Koswara', alamat: 'GBA 2 Ciganitri', hp: '0896 1297 6555', rontgen: false, shift: 'Shift 2', durasi: 8 },
+      { id: 9, nama: 'Muhammad Fachry Airlangga', alamat: 'Jl. Sapan Rancakaso', hp: '0838 6351 0380', rontgen: false, shift: 'Shift 2', durasi: 8 },
+      { id: 10, nama: 'Eef Saefulloh', alamat: 'Jl. Sapan Rancakaso', hp: '0877 4090 1564', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 11, nama: 'Sahrul Ramdani', alamat: 'Jl. Panembakan Utara', hp: '0838 2163 4765', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 12, nama: 'Farel Muhamad Yasin', alamat: 'Jl. Rancasigang', hp: '0838 6944 5972', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 13, nama: 'Andri Ariawan', alamat: 'Jl. Kawaluyaan', hp: '0812 8278 6856', rontgen: false, shift: '', durasi: 8 },
+      { id: 14, nama: 'Fajar Aryanto', alamat: 'Jl. Kawaluyaan', hp: '0896 3002 7461', rontgen: false, shift: '', durasi: 8 },
+      { id: 15, nama: 'Anhari Agustian', alamat: 'Jl. Pasirkukun', hp: '0831 2084 4277', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 16, nama: 'Riyad Abdul Azid', alamat: 'Jl. Panembakan, Cimahi', hp: '0831 0957 3150', rontgen: true, shift: 'Shift 2', durasi: 8 },
+      { id: 17, nama: 'Fajar Mahadika', alamat: 'Jl. Cigadung Raya Barat RT 03 RW 02', hp: '0831 7788 1671', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 18, nama: 'Rama Rachmadian', alamat: 'Jl. Sadakeling', hp: '0889 8035 7113', rontgen: false, shift: '', durasi: 8 },
+      { id: 19, nama: 'M Mulyana S.', alamat: 'Jln. Pajajaran Gg. Kina 13/6B', hp: '0888 2323 275', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 20, nama: 'Misbah Kholil Fadli', alamat: 'Jl. Cigadung Raya Barat RW. 02 RT. 03', hp: '0895 3253 80833', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 21, nama: 'Muhamad Nabil Nugraha', alamat: 'Jl. Cigadung Raya Barat RT 03 RW 02', hp: '0895 2455 5936', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 22, nama: 'Farhan Achmad', alamat: 'Jl. Cigadung Raya Barat RT 03 RW 03', hp: '0895 0787 0610', rontgen: false, shift: 'Shift 3', durasi: 8 },
+      { id: 23, nama: 'Muhamad Azhar Assidik', alamat: 'Jl. Cigadung Raya Barat RT 03 RW 02', hp: '0896 5262 8641', rontgen: false, shift: '', durasi: 8 }
+    ];
+
+    let personelList = JSON.parse(localStorage.getItem('hjs_personel_v3')) || INITIAL_PERSONEL;
+    let absensiList  = JSON.parse(localStorage.getItem('hjs_absensi_v3'))  || [];
+
+    function cekPin() {
+      const val = document.getElementById('pinInput').value;
+      if (val === ADMIN_PIN) {
+        document.getElementById('pinOverlay').classList.add('hidden');
+        syncFromCloud();
+      } else {
+        document.getElementById('pinError').classList.remove('hidden');
+      }
+    }
+
+    function saveLocal() {
+      localStorage.setItem('hjs_personel_v3', JSON.stringify(personelList));
+      localStorage.setItem('hjs_absensi_v3', JSON.stringify(absensiList));
+    }
+
+    function getTodayISO() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+
+    async function syncFromCloud() {
+      const statusEl = document.getElementById('cloudStatus');
+      statusEl.textContent = 'Menarik data...';
+      try {
+        const res = await fetch(`${API_URL}?action=getAll`);
+        const json = await res.json();
+        if (json.status === 'ok') {
+          if (json.personel && json.personel.length > 0) {
+            personelList = json.personel.map(p => ({
+              ...p,
+              rontgen: p.rontgen === true || String(p.rontgen).toLowerCase() === 'sudah'
+            }));
+          } else {
+            // Jika sheet masih kosong, langsung upload 23 data awal ke Google Sheets
+            await pushAllToCloud(true);
+          }
+          if (json.absensi) {
+            absensiList = json.absensi.map(a => ({
+              ...a,
+              tanggal: String(a.tanggal).slice(0, 10),
+              durasi: Number(a.durasi) || 8
+            }));
+          }
+          saveLocal();
+          renderPersonelTable();
+          renderRekap();
+          statusEl.textContent = `Tersinkron (${new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})})`;
+        }
+      } catch (err) {
+        statusEl.textContent = 'Offline (Data Lokal)';
+        renderPersonelTable();
+        renderRekap();
+      }
+    }
+
+    async function pushAllToCloud(silent = false) {
+      const statusEl = document.getElementById('cloudStatus');
+      statusEl.textContent = 'Menyimpan ke Cloud...';
+      saveLocal();
+      try {
+        await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'syncPersonel', list: personelList })
+        });
+        await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'syncAbsensi', list: absensiList })
+        });
+        statusEl.textContent = 'Tersimpan di Cloud';
+        if (!silent) alert('Semua data personel & rekap absensi berhasil disimpan ke Google Sheets!');
+      } catch (err) {
+        statusEl.textContent = 'Gagal sync cloud';
+        if (!silent) alert('Gagal menyimpan ke Cloud, namun data sudah tersimpan di browser.');
+      }
+    }
+
+    function switchTab(tab) {
+      const isPersonel = tab === 'personel';
+      document.getElementById('viewPersonel').classList.toggle('hidden', !isPersonel);
+      document.getElementById('viewInvoice').classList.toggle('hidden', isPersonel);
+
+      document.getElementById('tabBtnPersonel').className = isPersonel
+        ? 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg bg-slate-100 text-blue-950'
+        : 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg text-blue-200 hover:text-white';
+      document.getElementById('tabBtnInvoice').className = !isPersonel
+        ? 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg bg-slate-100 text-blue-950'
+        : 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg text-blue-200 hover:text-white';
+
+      if (!isPersonel) renderRekap();
+    }
+
+    function renderPersonelTable() {
+      const q = document.getElementById('searchInput').value.toLowerCase();
+      const fRontgen = document.getElementById('filterRontgen').value;
+      const fShift = document.getElementById('filterShift').value;
+      const today = getTodayISO();
+
+      const filtered = personelList.filter(p => {
+        const matchText = String(p.nama).toLowerCase().includes(q) || String(p.alamat).toLowerCase().includes(q) || String(p.hp).toLowerCase().includes(q);
+        const matchRontgen = fRontgen === 'ALL' || (fRontgen === 'SUDAH' && p.rontgen) || (fRontgen === 'BELUM' && !p.rontgen);
+        const matchShift = fShift === 'ALL' || p.shift === fShift;
+        return matchText && matchRontgen && matchShift;
+      });
+
+      document.getElementById('statTotal').textContent = personelList.length;
+      document.getElementById('statRontgen').textContent = personelList.filter(p => p.rontgen).length;
+      document.getElementById('statBelumRontgen').textContent = personelList.filter(p => !p.rontgen).length;
+      document.getElementById('statHadirToday').textContent = absensiList.filter(a => a.tanggal === today).length;
+
+      const tbody = document.getElementById('tbodyPersonel');
+      tbody.innerHTML = filtered.map((p, idx) => `
+        <tr class="hover:bg-slate-50">
+          <td class="py-2.5 px-3 font-semibold text-slate-500">${idx + 1}</td>
+          <td class="py-2.5 px-3 font-bold text-slate-800">${p.nama}</td>
+          <td class="py-2.5 px-3 text-slate-600">${p.alamat || '-'}</td>
+          <td class="py-2.5 px-3 font-mono text-xs text-slate-700">${p.hp || '-'}</td>
+          <td class="py-2.5 px-3 text-center">
+            <button onclick="toggleRontgen(${p.id})" class="px-2.5 py-1 rounded-full text-xs font-bold transition ${p.rontgen ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}">
+              ${p.rontgen ? 'Sudah Rontgen' : 'Belum Rontgen'}
+            </button>
+          </td>
+          <td class="py-2.5 px-3">
+            <select onchange="updateShift(${p.id}, this.value)" class="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white font-semibold">
+              <option value="" ${!p.shift ? 'selected' : ''}>- Kosong -</option>
+              <option value="Shift 1" ${p.shift === 'Shift 1' ? 'selected' : ''}>Shift 1</option>
+              <option value="Shift 2" ${p.shift === 'Shift 2' ? 'selected' : ''}>Shift 2</option>
+              <option value="Shift 3" ${p.shift === 'Shift 3' ? 'selected' : ''}>Shift 3</option>
+            </select>
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <button onclick="catatHadirManual(${p.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-2.5 py-1 rounded-lg">
+              + Hadir Hari Ini
+            </button>
+          </td>
+          <td class="py-2.5 px-3 text-center space-x-1">
+            <button onclick="openModalPersonel(${p.id})" class="text-amber-600 hover:underline text-xs font-bold">Edit</button>
+            <button onclick="deletePersonel(${p.id})" class="text-rose-600 hover:underline text-xs font-bold">Hapus</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function toggleRontgen(id) {
+      const item = personelList.find(p => String(p.id) === String(id));
+      if (item) {
+        item.rontgen = !item.rontgen;
+        saveLocal();
+        renderPersonelTable();
+      }
+    }
+
+    function updateShift(id, newShift) {
+      const item = personelList.find(p => String(p.id) === String(id));
+      if (item) {
+        item.shift = newShift;
+        saveLocal();
+      }
+    }
+
+    function catatHadirManual(id) {
+      const p = personelList.find(item => String(item.id) === String(id));
+      if (!p) return;
+      const today = getTodayISO();
+      const shift = p.shift || 'Shift 1';
+      const nowTime = new Date().toTimeString().slice(0, 5);
+      absensiList.push({
+        id: 'ABS-' + Date.now(),
+        tanggal: today,
+        personelId: p.id,
+        nama: p.nama,
+        shift: shift,
+        jamMasuk: nowTime,
+        jamPulang: '',
+        durasi: 8,
+        status: 'Hadir'
+      });
+      saveLocal();
+      renderPersonelTable();
+      alert(`${p.nama} (${shift}) dicatat hadir hari ini! Jangan lupa klik "Simpan ke Cloud" jika ingin menyinkronkan ke Google Sheets.`);
+    }
+
+    function openModalPersonel(id = null) {
+      const modal = document.getElementById('modalPersonel');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      if (id) {
+        const p = personelList.find(x => String(x.id) === String(id));
+        document.getElementById('modalTitle').textContent = 'Edit Data Personel';
+        document.getElementById('editId').value = p.id;
+        document.getElementById('formNama').value = p.nama;
+        document.getElementById('formAlamat').value = p.alamat || '';
+        document.getElementById('formHp').value = p.hp || '';
+        document.getElementById('formRontgen').value = String(!!p.rontgen);
+        document.getElementById('formShift').value = p.shift || '';
+      } else {
+        document.getElementById('modalTitle').textContent = 'Tambah Personel Baru';
+        document.getElementById('editId').value = '';
+        document.getElementById('formNama').value = '';
+        document.getElementById('formAlamat').value = '';
+        document.getElementById('formHp').value = '';
+        document.getElementById('formRontgen').value = 'false';
+        document.getElementById('formShift').value = '';
+      }
+    }
+
+    function closeModalPersonel() {
+      const modal = document.getElementById('modalPersonel');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function savePersonelForm() {
+      const id = document.getElementById('editId').value;
+      const nama = document.getElementById('formNama').value.trim();
+      if (!nama) return alert('Nama wajib diisi!');
+      const payload = {
+        nama,
+        alamat: document.getElementById('formAlamat').value.trim(),
+        hp: document.getElementById('formHp').value.trim(),
+        rontgen: document.getElementById('formRontgen').value === 'true',
+        shift: document.getElementById('formShift').value,
+        durasi: 8
+      };
+      if (id) {
+        const idx = personelList.findIndex(x => String(x.id) === String(id));
+        if (idx !== -1) personelList[idx] = { ...personelList[idx], ...payload };
+      } else {
+        personelList.push({ id: Date.now(), ...payload });
+      }
+      saveLocal();
+      renderPersonelTable();
+      closeModalPersonel();
+    }
+
+    function deletePersonel(id) {
+      if (!confirm('Hapus personel ini dari daftar?')) return;
+      personelList = personelList.filter(p => String(p.id) !== String(id));
+      saveLocal();
+      renderPersonelTable();
+    }
+
+    // ==================== LOGIKA REKAP & INVOICE ====================
+    function initDefaultDates() {
+      const today = getTodayISO();
+      document.getElementById('tglMulai').value = today;
+      document.getElementById('tglSelesai').value = today;
+      document.getElementById('inputBulan').value = today.slice(0, 7);
+    }
+    initDefaultDates();
+
+    function togglePeriodeInputs() {
+      const mode = document.getElementById('rekapMode').value;
+      document.getElementById('boxTglMulai').classList.toggle('hidden', mode === 'BULANAN' || mode === 'SEMUA');
+      document.getElementById('boxTglSelesai').classList.toggle('hidden', mode !== 'MINGGUAN');
+      document.getElementById('boxBulan').classList.toggle('hidden', mode !== 'BULANAN');
+    }
+
+    function getFilteredAbsensi() {
+      const mode = document.getElementById('rekapMode').value;
+      const start = document.getElementById('tglMulai').value;
+      const end = document.getElementById('tglSelesai').value;
+      const bulan = document.getElementById('inputBulan').value;
+
+      return absensiList.filter(a => {
+        if (mode === 'HARIAN') return a.tanggal === start;
+        if (mode === 'MINGGUAN') return (!start || a.tanggal >= start) && (!end || a.tanggal <= end);
+        if (mode === 'BULANAN') return String(a.tanggal).startsWith(bulan);
+        return true;
+      });
+    }
+
+    function formatRupiah(num) {
+      return 'Rp ' + Math.round(num).toLocaleString('id-ID');
+    }
+
+    function renderRekap() {
+      const logs = getFilteredAbsensi();
+      const tarifRaw = document.getElementById('inputTarif').value;
+      const hasTarif = tarifRaw !== '' && Number(tarifRaw) > 0;
+      const tarif = hasTarif ? Number(tarifRaw) : 0;
+      const feePct = Number(document.getElementById('inputFee').value) || 0;
+      const ppnPct = Number(document.getElementById('inputPpn').value) || 0;
+
+      // Agregasi per personel
+      const map = {};
+      logs.forEach(item => {
+        if (!map[item.nama]) map[item.nama] = { nama: item.nama, shifts: 0, jam: 0 };
+        map[item.nama].shifts += 1;
+        map[item.nama].jam += Number(item.durasi) || 0;
+      });
+
+      const summaryList = Object.values(map).sort((a, b) => a.nama.localeCompare(b.nama));
+      const totalShifts = logs.length;
+      const totalJam = summaryList.reduce((acc, cur) => acc + cur.jam, 0);
+      const subtotal = totalJam * tarif;
+      const feeNominal = subtotal * (feePct / 100);
+      const ppnNominal = (subtotal + feeNominal) * (ppnPct / 100);
+      const grandTotal = subtotal + feeNominal + ppnNominal;
+
+      document.getElementById('invTotalShift').textContent = `${totalShifts} Shift`;
+      document.getElementById('invTotalJam').textContent = `${totalJam} Jam`;
+      document.getElementById('invSubtotal').textContent = hasTarif ? formatRupiah(subtotal) : '-';
+      document.getElementById('invGrandTotal').textContent = hasTarif ? formatRupiah(grandTotal) : '-';
+
+      const tbodyRekap = document.getElementById('tbodyRekapPersonel');
+      if (summaryList.length === 0) {
+        tbodyRekap.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-400">Belum ada data absensi pada periode yang dipilih.</td></tr>';
+      } else {
+        tbodyRekap.innerHTML = summaryList.map((row, idx) => `
+          <tr class="hover:bg-slate-50">
+            <td class="py-2.5 px-3">${idx + 1}</td>
+            <td class="py-2.5 px-3 font-bold text-slate-800">${row.nama}</td>
+            <td class="py-2.5 px-3 text-center">${row.shifts}</td>
+            <td class="py-2.5 px-3 text-center font-bold text-blue-800">${row.jam} Jam</td>
+            <td class="py-2.5 px-3 text-right">${hasTarif ? formatRupiah(tarif) : '-'}</td>
+            <td class="py-2.5 px-3 text-right font-bold">${hasTarif ? formatRupiah(row.jam * tarif) : '-'}</td>
+          </tr>
+        `).join('');
+      }
+
+      const tbodyLog = document.getElementById('tbodyLogHarian');
+      if (logs.length === 0) {
+        tbodyLog.innerHTML = '<tr><td colspan="7" class="py-4 text-center text-slate-400">Tidak ada log harian.</td></tr>';
+      } else {
+        tbodyLog.innerHTML = logs.map(log => `
+          <tr class="hover:bg-slate-50">
+            <td class="py-2 px-3 font-mono text-xs">${log.tanggal}</td>
+            <td class="py-2 px-3 font-semibold">${log.nama}</td>
+            <td class="py-2 px-3">${log.shift}</td>
+            <td class="py-2 px-3 font-mono">${log.jamMasuk || '-'}</td>
+            <td class="py-2 px-3 font-mono">${log.jamPulang || '-'}</td>
+            <td class="py-2 px-3 text-center">
+              <input type="number" step="0.5" value="${log.durasi}" onchange="editDurasiLog('${log.id}', this.value)" class="w-16 text-center border border-slate-300 rounded px-1.5 py-0.5 font-bold text-blue-800">
+            </td>
+            <td class="py-2 px-3 text-center">
+              <button onclick="hapusLog('${log.id}')" class="text-rose-600 hover:underline text-xs font-bold">Hapus</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    function editDurasiLog(id, val) {
+      const item = absensiList.find(a => String(a.id) === String(id));
+      if (item) {
+        item.durasi = Number(val) || 0;
+        saveLocal();
+        renderRekap();
+      }
+    }
+
+    function hapusLog(id) {
+      if (!confirm('Hapus catatan absensi ini?')) return;
+      absensiList = absensiList.filter(a => String(a.id) !== String(id));
+      saveLocal();
+      renderRekap();
+    }
+
+    // ==================== EXPORT PDF ====================
+    function exportPersonelPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.setFontSize(14);
+      doc.text('DAFTAR PERSONEL PT HASNA JAYA SEJAHTERA', 14, 16);
+      doc.setFontSize(10);
+      doc.text('Penempatan: MBU Bojong Soang', 14, 22);
+
+      doc.autoTable({
+        startY: 28,
+        head: [['No', 'Nama Lengkap', 'Alamat', 'No. HP', 'Rontgen', 'Plot Shift']],
+        body: personelList.map((p, i) => [i + 1, p.nama, p.alamat || '-', p.hp || '-', p.rontgen ? 'Sudah' : 'Belum', p.shift || '-']),
+        styles: { fontSize: 8 }
+      });
+      doc.save('Daftar_Personel_HJS_MBU.pdf');
+    }
+
+    function exportRekapPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const logs = getFilteredAbsensi();
+      const map = {};
+      logs.forEach(item => {
+        if (!map[item.nama]) map[item.nama] = { nama: item.nama, shifts: 0, jam: 0 };
+        map[item.nama].shifts += 1;
+        map[item.nama].jam += Number(item.durasi) || 0;
+      });
+      const rows = Object.values(map).sort((a, b) => a.nama.localeCompare(b.nama));
+
+      doc.setFontSize(14);
+      doc.text('REKAPITULASI JAM KERJA PERSONEL', 14, 16);
+      doc.setFontSize(10);
+      doc.text('PT Hasna Jaya Sejahtera — Klien: MBU Bojong Soang', 14, 22);
+
+      doc.autoTable({
+        startY: 28,
+        head: [['No', 'Nama Personel', 'Total Shift', 'Total Jam Kerja']],
+        body: rows.map((r, i) => [i + 1, r.nama, `${r.shifts} Shift`, `${r.jam} Jam`]),
+        styles: { fontSize: 9 }
+      });
+      doc.save('Rekap_Jam_Kerja_HJS_MBU.pdf');
+    }
+
+    function exportInvoicePDF() {
+      const tarifRaw = document.getElementById('inputTarif').value;
+      if (!tarifRaw || Number(tarifRaw) <= 0) {
+        return alert('Isi terlebih dahulu kolom "Tarif per Jam (Rp)" sebelum mencetak Invoice!');
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const tarif = Number(tarifRaw);
+      const feePct = Number(document.getElementById('inputFee').value) || 0;
+      const ppnPct = Number(document.getElementById('inputPpn').value) || 0;
+      const noInv = document.getElementById('noInvoice').value;
+
+      const logs = getFilteredAbsensi();
+      const map = {};
+      logs.forEach(item => {
+        if (!map[item.nama]) map[item.nama] = { nama: item.nama, shifts: 0, jam: 0 };
+        map[item.nama].shifts += 1;
+        map[item.nama].jam += Number(item.durasi) || 0;
+      });
+      const rows = Object.values(map).sort((a, b) => a.nama.localeCompare(b.nama));
+      const subtotal = rows.reduce((acc, r) => acc + r.jam * tarif, 0);
+      const fee = subtotal * (feePct / 100);
+      const ppn = (subtotal + fee) * (ppnPct / 100);
+      const grandTotal = subtotal + fee + ppn;
+
+      doc.setFontSize(16);
+      doc.text('INVOICE PENAGIHAN JASA TENAGA KERJA', 14, 18);
+      doc.setFontSize(10);
+      doc.text('Dari: PT Hasna Jaya Sejahtera', 14, 26);
+      doc.text('Kepada: MBU Bojong Soang', 14, 31);
+      doc.text(`No. Invoice: ${noInv}`, 130, 26);
+      doc.text(`Tanggal Cetak: ${getTodayISO()}`, 130, 31);
+
+      doc.autoTable({
+        startY: 38,
+        head: [['No', 'Nama Personel', 'Shift', 'Total Jam', 'Tarif / Jam', 'Subtotal']],
+        body: rows.map((r, i) => [i + 1, r.nama, r.shifts, `${r.jam} Jam`, formatRupiah(tarif), formatRupiah(r.jam * tarif)]),
+        styles: { fontSize: 8.5 }
+      });
+
+      const finalY = doc.lastAutoTable.finalY + 8;
+      doc.setFontSize(10);
+      doc.text(`Subtotal Tenaga Kerja : ${formatRupiah(subtotal)}`, 120, finalY);
+      doc.text(`Management Fee (${feePct}%) : ${formatRupiah(fee)}`, 120, finalY + 6);
+      doc.text(`PPN (${ppnPct}%)            : ${formatRupiah(ppn)}`, 120, finalY + 12);
+      doc.setFontSize(11);
+      doc.text(`GRAND TOTAL           : ${formatRupiah(grandTotal)}`, 120, finalY + 20);
+
+      doc.save(`${noInv.replace(/\//g, '_')}.pdf`);
+    }
+
+    renderPersonelTable();
+  </script>
+</body>
+</html>
