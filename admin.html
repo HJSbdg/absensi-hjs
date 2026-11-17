@@ -359,11 +359,20 @@
             await pushAllToCloud(true);
           }
           if (json.absensi) {
-            absensiList = json.absensi.map(a => ({
-              ...a,
-              tanggal: String(a.tanggal).slice(0, 10),
-              durasi: Number(a.durasi) || 8
-            }));
+            absensiList = json.absensi.map(a => {
+              let tgl = String(a.tanggal);
+              if (tgl.includes('T') && tgl.endsWith('Z')) {
+                const d = new Date(tgl);
+                tgl = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              } else {
+                tgl = tgl.slice(0, 10);
+              }
+              return {
+                ...a,
+                tanggal: tgl,
+                durasi: Number(a.durasi) || 8
+              };
+            });
           }
           saveLocal();
           renderPersonelTable();
