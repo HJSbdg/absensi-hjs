@@ -91,6 +91,11 @@
             <option value="SUDAH">Sudah Rontgen</option>
             <option value="BELUM">Belum Rontgen</option>
           </select>
+          <select id="filterAvail" onchange="renderPersonelTable()" class="border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm bg-white font-medium">
+            <option value="ALL">Semua Status Shift</option>
+            <option value="AVAILABLE">Available (Belum Masuk)</option>
+            <option value="ONSHIFT">Sudah Masuk Hari Ini</option>
+          </select>
         </div>
         <div class="flex flex-wrap gap-2">
           <button onclick="openModalPersonel()" class="bg-blue-800 hover:bg-blue-900 text-white text-xs font-bold px-3.5 py-2 rounded-lg">+ Tambah Personel</button>
@@ -98,13 +103,14 @@
         </div>
       </div>
 
-      <!-- Tabel Personel (Tanpa Kolom Shift & Catat Hadir Manual) -->
+      <!-- Tabel Personel dengan Indikator Otomatis -->
       <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         <table class="w-full text-left border-collapse text-xs sm:text-sm">
           <thead>
             <tr class="bg-slate-800 text-white text-xs uppercase">
               <th class="py-3 px-3">No</th>
               <th class="py-3 px-3">Nama Lengkap</th>
+              <th class="py-3 px-3 text-center">Status Hari Ini</th>
               <th class="py-3 px-3">Alamat</th>
               <th class="py-3 px-3">No. HP</th>
               <th class="py-3 px-3 text-center">Status Rontgen</th>
@@ -308,7 +314,6 @@
     let personelList = JSON.parse(localStorage.getItem('hjs_personel_v3')) || INITIAL_PERSONEL;
     let absensiList  = JSON.parse(localStorage.getItem('hjs_absensi_v3'))  || [];
 
-    // Mengubah format 1899-12-30T16:35:56.000Z atau string jam menjadi HH:MM WIB yang bersih
     function formatJamWIB(val) {
       if (!val || val === '-') return '-';
       const str = String(val).trim();
@@ -429,33 +434,62 @@
         ? 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg bg-slate-100 text-blue-950'
         : 'px-4 py-2.5 text-xs sm:text-sm font-bold rounded-t-lg text-blue-200 hover:text-white';
 
-      if (!isPersonel) {
+      if (isPersonel) {
+        renderPersonelTable();
+      } else {
         renderRekap();
         syncFromCloud();
       }
     }
 
+    function isPersonelOnShiftToday(personel, todayLogs) {
+      const pId = String(personel.id).trim();
+      const pName = String(personel.nama).trim().toLowerCase();
+      return todayLogs.some(a =>
+        String(a.personelId).trim() === pId ||
+        String(a.nama).trim().toLowerCase() === pName
+      );
+    }
+
     function renderPersonelTable() {
       const q = document.getElementById('searchInput').value.toLowerCase();
       const fRontgen = document.getElementById('filterRontgen').value;
+      const fAvail = document.getElementById('filterAvail').value;
       const today = getTodayISO();
+      const todayLogs = absensiList.filter(a => a.tanggal === today);
 
       const filtered = personelList.filter(p => {
+        const onShift = isPersonelOnShiftToday(p, todayLogs);
         const matchText = String(p.nama).toLowerCase().includes(q) || String(p.alamat).toLowerCase().includes(q) || String(p.hp).toLowerCase().includes(q);
         const matchRontgen = fRontgen === 'ALL' || (fRontgen === 'SUDAH' && p.rontgen) || (fRontgen === 'BELUM' && !p.rontgen);
-        return matchText && matchRontgen;
+        const matchAvail = fAvail === 'ALL' || (fAvail === 'ONSHIFT' && onShift) || (fAvail === 'AVAILABLE' && !onShift);
+        return matchText && matchRontgen && matchAvail;
       });
 
       document.getElementById('statTotal').textContent = personelList.length;
       document.getElementById('statRontgen').textContent = personelList.filter(p => p.rontgen).length;
       document.getElementById('statBelumRontgen').textContent = personelList.filter(p => !p.rontgen).length;
-      document.getElementById('statHadirToday').textContent = absensiList.filter(a => a.tanggal === today).length;
+      document.getElementById('statHadirToday').textContent = todayLogs.length;
 
       const tbody = document.getElementById('tbodyPersonel');
-      tbody.innerHTML = filtered.map((p, idx) => `
-        <tr class="hover:bg-slate-50">
+      tbody.innerHTML = filtered.map((p, idx) => {
+        const onShift = isPersonelOnShiftToday(p, todayLogs);
+        return `
+        <tr class="${onShift ? 'bg-emerald-50/40 hover:bg-emerald-50/70' : 'hover:bg-slate-50'}">
           <td class="py-2.5 px-3 font-semibold text-slate-500">${idx + 1}</td>
           <td class="py-2.5 px-3 font-bold text-slate-800">${p.nama}</td>
+          <td class="py-2.5 px-3 text-center">
+            ${onShift
+              ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                   <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                   Sudah Masuk
+                 </span>`
+              : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                   <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+                   Available
+                 </span>`
+            }
+          </td>
           <td class="py-2.5 px-3 text-slate-600">${p.alamat || '-'}</td>
           <td class="py-2.5 px-3 font-mono text-xs text-slate-700">${p.hp || '-'}</td>
           <td class="py-2.5 px-3 text-center">
@@ -468,7 +502,7 @@
             <button onclick="deletePersonel(${p.id})" class="text-rose-600 hover:underline text-xs font-bold">Hapus</button>
           </td>
         </tr>
-      `).join('');
+      `}).join('');
     }
 
     function toggleRontgen(id) {
