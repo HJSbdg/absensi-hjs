@@ -44,7 +44,7 @@
         <!-- Pilih Nama -->
         <div>
           <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">1. Pilih Nama Anda</label>
-          <select id="selectNama" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm font-semibold rounded-xl px-3.5 py-3 focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none">
+          <select id="selectNama" onchange="cekStatusCloudByDropdown()" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm font-semibold rounded-xl px-3.5 py-3 focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none">
             <option value="">-- Sedang memuat nama... --</option>
           </select>
         </div>
@@ -132,17 +132,6 @@
       <div id="alertBox" class="hidden rounded-xl p-3.5 text-sm font-medium border"></div>
 
     </div>
-
-    <!-- Riwayat Absen Hari Ini di HP -->
-    <div class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-      <div class="flex items-center justify-between mb-2.5">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-600">Tercatat Hari Ini (<span id="countToday">0</span>)</h2>
-        <button onclick="loadPersonel()" class="text-[11px] text-blue-600 font-semibold">Perbarui</button>
-      </div>
-      <div id="todayList" class="divide-y divide-slate-100 text-xs text-slate-600">
-        <p class="py-2 text-slate-400 text-center">Belum ada data absen hari ini.</p>
-      </div>
-    </div>
   </main>
 
   <footer class="text-center py-4 text-[11px] text-slate-400">
@@ -171,6 +160,7 @@
     ];
 
     let personelData = [];
+    let cloudAbsensiCache = [];
     let isSubmitting = false;
 
     function normalizeTanggal(val) {
@@ -202,6 +192,15 @@
         return str.replace('.', ':').slice(0, 5);
       }
       return str;
+    }
+
+    function parseStartTimestamp(tanggalISO, jamHHMM) {
+      const cleanJam = formatJamWIB(jamHHMM);
+      if (/^\d{2}:\d{2}$/.test(cleanJam) && /^\d{4}-\d{2}-\d{2}$/.test(tanggalISO)) {
+        const dt = new Date(`${tanggalISO}T${cleanJam}:00+07:00`);
+        if (!isNaN(dt.getTime())) return dt.getTime();
+      }
+      return Date.now();
     }
 
     function getCurrentHHMM() {
@@ -242,7 +241,9 @@
       renderSessionUI();
     }
 
-    // Sinkronisasi otomatis: jika Admin menghapus baris atau mengisi jamPulang di Google Sheets, HP otomatis terbuka lagi
+    // Sinkronisasi otomatis dengan Cloud:
+    // 1. Jika admin menghapus baris atau mengisi jamPulang di Google Sheets -> buka kunci otomatis
+    // 2. Jika personel sudah masuk hari ini (misal sebelum update halaman) dan belum pulang -> langsung masuk sesi aktif
     function reconcileSessionWithCloud(cloudAbsensi) {
       const session = getActiveSession();
       if (!session || !Array.isArray(cloudAbsensi)) return;
@@ -257,6 +258,37 @@
 
       if (!activeLogInSheet) {
         setActiveSession(null);
+      }
+    }
+
+    // Jika personel yang sudah absen masuk tadi siang memilih namanya di dropdown,
+    // otomatis aktifkan mode Sedang Bertugas agar tombol Absen Pulang muncul
+    function cekStatusCloudByDropdown() {
+      if (getActiveSession()) return;
+      const select = document.getElementById('selectNama');
+      const personelId = select.value;
+      const nama = select.options[select.selectedIndex]?.getAttribute('data-nama') || '';
+      if (!personelId) return;
+
+      const today = getTodayISO();
+      const openLog = cloudAbsensiCache.find(a => {
+        const samePerson = String(a.personelId).trim() === String(personelId).trim() ||
+                           String(a.nama).trim().toLowerCase() === String(nama).trim().toLowerCase();
+        const sameDate = normalizeTanggal(a.tanggal) === today;
+        const stillOpen = !a.jamPulang || String(a.jamPulang).trim() === '' || String(a.jamPulang).trim() === '-';
+        return samePerson && sameDate && stillOpen;
+      });
+
+      if (openLog) {
+        const jamMasukClean = formatJamWIB(openLog.jamMasuk);
+        setActiveSession({
+          personelId: personelId,
+          nama: openLog.nama || nama,
+          shift: openLog.shift || 'Shift 1',
+          tanggal: today,
+          jamMasuk: jamMasukClean,
+          startTimestamp: parseStartTimestamp(today, jamMasukClean)
+        });
       }
     }
 
@@ -360,9 +392,9 @@
         if (json.status === 'ok') {
           personelData = (json.personel && json.personel.length > 0) ? json.personel : FALLBACK_PERSONEL;
           renderDropdown(personelData);
-          const absensiCloud = json.absensi || [];
-          reconcileSessionWithCloud(absensiCloud);
-          renderTodayList(absensiCloud);
+          cloudAbsensiCache = json.absensi || [];
+          reconcileSessionWithCloud(cloudAbsensiCache);
+          cekStatusCloudByDropdown();
           syncText.textContent = `Terhubung (${personelData.length} personel aktif)`;
         } else {
           throw new Error(json.message);
@@ -381,28 +413,6 @@
       select.innerHTML = '<option value="">-- Pilih Nama Anda --</option>' +
         sorted.map(p => `<option value="${p.id}" data-nama="${p.nama}">${p.nama}</option>`).join('');
       if (currentVal) select.value = currentVal;
-    }
-
-    function renderTodayList(absensiList) {
-      const today = getTodayISO();
-      const filtered = absensiList.filter(a => normalizeTanggal(a.tanggal).startsWith(today));
-      document.getElementById('countToday').textContent = filtered.length;
-      const container = document.getElementById('todayList');
-      if (filtered.length === 0) {
-        container.innerHTML = '<p class="py-2 text-slate-400 text-center">Belum ada yang absen hari ini.</p>';
-        return;
-      }
-      container.innerHTML = filtered.slice().reverse().map(item => `
-        <div class="py-2 flex items-center justify-between">
-          <div>
-            <div class="font-bold text-slate-800">${item.nama}</div>
-            <div class="text-[11px] text-slate-500">${item.shift} &bull; Masuk: <b>${formatJamWIB(item.jamMasuk)}</b> ${item.jamPulang ? `| Pulang: <b>${formatJamWIB(item.jamPulang)}</b> (${item.durasi} jam)` : ''}</div>
-          </div>
-          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${item.jamPulang ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}">
-            ${item.jamPulang ? 'Selesai' : 'Aktif'}
-          </span>
-        </div>
-      `).join('');
     }
 
     function showAlert(type, msg) {
